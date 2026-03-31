@@ -1396,7 +1396,123 @@ Full MCP server catalog: `https://github.com/modelcontextprotocol/servers`
 
 ---
 
-## 21. Official Resources
+## 21. 🟡 Iterative Self-Refinement — Autonomous Overnight Code Improvement
+
+**Why:** Run the agent in a loop: analyze → find a problem → fix → repeat. Over 30-50 iterations, the agent finds and fixes things a human wouldn't notice in a week of manual review. Each iteration, the agent looks at the code with "fresh eyes" and notices something new.
+
+**Principle:** a human gets tired after the 2nd iteration and stops noticing things. The agent doesn't get tired — on the 40th iteration, it's just as attentive as on the 1st.
+
+**How to implement:**
+
+Method 1 — via `/loop`:
+```bash
+/loop 50 "Analyze the project code. Find one problem (bug, duplicate, 
+          inefficiency, convention violation). Fix it.
+          Write to ITERATIONS.md: what you found, what you fixed, why."
+```
+
+Method 2 — via `Stop` hook (agent doesn't stop while there's room for improvement):
+```json
+// .claude/settings.json
+{
+  "hooks": {
+    "Stop": [{
+      "command": "echo 'Continue. Find one more problem and fix it.'",
+      "timeout": 5000
+    }]
+  }
+}
+```
+
+Method 3 — via bash script (maximum control):
+```bash
+#!/bin/bash
+# overnight-refactor.sh
+git checkout -b refactor/overnight-$(date +%Y%m%d)
+git commit -am "checkpoint: before overnight refactoring"
+
+for i in $(seq 1 50); do
+  echo "=== Iteration $i/50 ==="
+  claude -p "Iteration $i/50.
+    1. Analyze the entire project
+    2. Find ONE specific problem (bug, duplicate, dead code,
+       inefficient query, DRY/SOLID violation)
+    3. Fix it
+    4. Add an entry to ITERATIONS.md: number, what was, what became, why
+    5. If no problems remain — write 'DONE' and stop"
+  
+  git add -A && git commit -m "refactor: iteration $i"
+  
+  # Stop if agent said DONE
+  grep -q "DONE" ITERATIONS.md && break
+done
+echo "Done. Check git log and ITERATIONS.md"
+```
+
+📌 Real-world example
+
+**Situation:** You have a Python backend with 15k lines. The code was written by 3 different developers over 2 years. Different styles, duplicates, outdated patterns, unoptimized SQL queries. Manual refactoring would take a week. You run the script before bed.
+
+**Iterations 1-5:** the obvious stuff
+```
+#1: Removed 3 unused imports in parsers/olx.py
+#2: Replaced print() with logger.info() in 7 places
+#3: Removed duplicate function format_price() — existed in both utils.py and helpers.py
+#4: Added timeout to requests.get() in 4 files (was missing)
+#5: Replaced bare except: with except requests.RequestException: in 6 places
+```
+
+**Iterations 10-20:** patterns
+```
+#12: Extracted repeating retry logic into @with_retry(max=3, backoff=2) decorator
+#15: Replaced 8 identical Redis connection blocks with a connection pool
+#18: Found N+1 query in /properties API endpoint — replaced with JOIN
+```
+
+**Iterations 30-50:** deep improvements
+```
+#33: Unified 3 similar parsers (OLX, DOM.RIA, Lun) into an abstract base class
+#41: Found race condition in mailing queue — added Redis lock
+#47: Optimized bulk insert: instead of 1000 individual INSERTs — one COPY
+#50: DONE — no critical issues remain
+```
+
+**In the morning:**
+```bash
+git log --oneline  # 47 commits with description of each change
+cat ITERATIONS.md  # full report of what and why
+git diff main      # entire diff for review
+```
+
+**Result:** code became cleaner, faster, safer. Every change is documented. Any iteration can be reverted individually.
+
+**⚠️ Mandatory safety measures:**
+
+| What | Why |
+|------|-----|
+| `git commit` before starting | Rollback if everything breaks |
+| Separate branch | Don't touch main |
+| Commit each iteration | Revert specific changes |
+| Tests after (if available) | Make sure nothing is broken |
+| ITERATIONS.md | Report for morning review |
+| Iteration limit | Not infinite — 30-50 is enough |
+
+**⚠️ Token usage:** 50 iterations on a 15k-line project ≈ significant cost. Calculate your budget in advance.
+
+**Who needs this:**
+- Legacy code that hasn't been refactored in a long time
+- Projects after multiple developers with different styles
+- Code preparation for review or audit
+- "Squeeze the maximum" from the codebase before release
+
+**When NOT needed:**
+- Fresh, clean code — the agent won't find much to improve after the 5th iteration
+- Code without tests and no way to verify — risky
+- When token budget is limited
+
+---
+
+## 22. Official Resources
 
 | Resource | Link |
 |---|---|
