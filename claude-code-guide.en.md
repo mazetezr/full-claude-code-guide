@@ -1098,7 +1098,305 @@ Full curated list: https://github.com/walkinglabs/awesome-harness-engineering
 
 ---
 
-## 20. Official Resources
+## 20. 🟡 MCP Servers — Extending Agent Capabilities
+
+**Why:** MCP (Model Context Protocol) is a protocol that gives Claude Code access to external tools. Without MCP, the agent can: read/write files, bash, git. With MCP — it connects to databases, remote servers, browsers, documentation, and any API.
+
+**Principle:** one MCP server = one data source or tool. The agent decides when to call the appropriate MCP based on task context.
+
+**How to connect MCP:**
+
+```bash
+# Via CLI
+claude mcp add <name> -- <launch command>
+
+# Or in .claude/settings.json
+{
+  "mcpServers": {
+    "server-name": {
+      "command": "npx",
+      "args": ["-y", "@package/mcp-server"]
+    }
+  }
+}
+```
+
+Documentation: `https://code.claude.com/docs/en/mcp`
+
+---
+
+### 20.1 Context7 — Up-to-date Library Documentation
+
+**Why:** Claude Code is trained on data with a specific cutoff date. It doesn't know about new APIs, breaking changes, or updated best practices. Context7 pulls up-to-date documentation directly from official library sources — in real time, for the specific version.
+
+**Installation:**
+
+```bash
+claude mcp add context7 -- npx -y @upstash/context7-mcp@latest
+```
+
+**Usage:**
+
+Add `use context7` to your prompt:
+```
+Create a FastAPI middleware with JWT authorization. use context7
+```
+
+The agent automatically:
+1. Determines it needs FastAPI documentation
+2. Pulls current docs for the latest version
+3. Writes code based on real APIs, not memory
+
+📌 Real-world example
+
+**Situation:** You're using Selenium 4.x for scraping. Selenium 4 changed its API — `find_element_by_xpath()` became `find_element(By.XPATH, ...)`. Without Context7, the agent might write old syntax (it saw it more often in training data). With Context7 — it pulls the current API.
+
+```bash
+# Without context7:
+driver.find_element_by_xpath("//div[@class='price']")  # deprecated since Selenium 4
+
+# With context7:
+driver.find_element(By.XPATH, "//div[@class='price']")  # current API
+```
+
+**Who needs this:** everyone — this is a foundational MCP. Especially if you work with frequently updated libraries (frameworks, ORMs, cloud SDKs).
+
+Repository: `https://github.com/upstash/context7`
+
+---
+
+### 20.2 SSH Manager — Remote Server Management
+
+**Why:** Give the agent SSH access to servers. The agent can: execute commands, read logs, check service status, manage Docker containers, create backups — all through natural language.
+
+**Installation:**
+
+```bash
+npm install -g mcp-ssh-manager
+claude mcp add ssh-manager -- npx mcp-ssh-manager
+
+# Add a server
+ssh-manager server add
+# → name: production
+# → host: 192.168.1.100
+# → user: deploy
+# → key: ~/.ssh/id_rsa
+```
+
+**Capabilities (37+ tools):**
+
+| Category | What it can do |
+|---|---|
+| Commands | Execute any shell commands on the remote server |
+| Monitoring | CPU, RAM, disk, service status |
+| Docker | Container list, logs, restart, stats |
+| Files | Upload/download files between local machine and server |
+| Databases | Dump/restore MySQL, PostgreSQL, MongoDB |
+| Security | Log analysis, IP blocking via iptables/ufw |
+
+📌 Real-world example
+
+**Situation:** You're a DevOps/backend developer. The parser crashed at 3 AM on production. In the morning, you need to understand what happened, fix it, and restart.
+
+```bash
+claude> "Connect to the production server.
+        Show parser logs for the last 2 hours.
+        Find errors and explain what happened."
+
+# Agent:
+# 1. SSH to production
+# 2. tail -n 500 /var/log/parser/error.log
+# 3. Analyzes: "OLX blocked the IP at 03:17. Rate limit exceeded.
+#    Proxy rotation didn't work — proxies.txt file is empty."
+# 4. Suggests: "Update proxy list and restart the parser"
+
+claude> "Restart the parser and confirm it's working"
+# docker restart parser && docker logs --tail 20 parser
+```
+
+More advanced example — server protection:
+```bash
+claude> "Analyze /var/log/auth.log for the last 24 hours.
+        Find suspicious IPs with brute force attempts.
+        Block them via ufw."
+
+# Agent:
+# 1. grep "Failed password" /var/log/auth.log | awk '{print $11}' | sort | uniq -c | sort -rn
+# 2. "Found 3 IPs with 500+ attempts: 45.33.x.x, 91.12.x.x, 185.7.x.x"
+# 3. ufw deny from 45.33.x.x && ufw deny from 91.12.x.x && ...
+```
+
+**Who needs this:**
+- DevOps and sysadmins managing servers
+- Backend developers with access to staging/production
+- Projects with Docker on remote servers
+- Monitoring and incident management
+
+**When NOT needed:** local development without servers, frontend projects.
+
+**⚠️ Security:** SSH access for AI is powerful but dangerous. Recommendations:
+- Use a separate user with limited permissions
+- Never give root access
+- Start with read-only commands (logs, status)
+- Use SSH keys, not passwords
+- On production — only after testing on staging
+
+Repository: `https://github.com/bvisible/mcp-ssh-manager`
+
+---
+
+### 20.3 PostgreSQL MCP — Direct Database Access
+
+**Why:** The agent connects to PostgreSQL and can: execute SQL queries, explore schema, analyze performance, help with migrations. Instead of copying queries between terminal and Claude — the agent works with the database directly.
+
+**Installation:**
+
+```bash
+# Basic variant (read-only by default)
+claude mcp add postgres -- npx -y @modelcontextprotocol/server-postgres \
+  "postgresql://user:pass@localhost:5432/mydb"
+
+# Or advanced with performance analysis
+npm install -g @henkey/postgres-mcp-server
+```
+
+**Capabilities:**
+
+| Function | Description |
+|---|---|
+| Schema exploration | List tables, columns, types, relationships |
+| SQL queries | SELECT, INSERT, UPDATE (if allowed) |
+| EXPLAIN analysis | Show query execution plan |
+| Indexes | Suggest optimal indexes |
+| Migrations | Help with migration generation |
+| DB health | Table sizes, dead rows, bloat |
+
+📌 Real-world example
+
+**Situation:** You're working on a real estate parser. Data is saved to PostgreSQL. You need to understand the data structure, find duplicates, optimize a slow query.
+
+```bash
+claude> "Show the properties table schema — fields, types, indexes"
+# Agent: SELECT * FROM information_schema.columns WHERE table_name = 'properties'
+# "Table properties: id, url, price, area, rooms, address, source, created_at, ...
+#  Indexes: primary key on id, no index on url — this is a problem for deduplication"
+
+claude> "Find duplicate listings by URL"
+# SELECT url, COUNT(*) as cnt FROM properties GROUP BY url HAVING COUNT(*) > 1 ORDER BY cnt DESC
+# "Found 847 duplicates. Top: olx.ua/d/obyavlenie/... — 12 copies"
+
+claude> "Why is the district search query slow?"
+# EXPLAIN ANALYZE SELECT * FROM properties WHERE address ILIKE '%Shevchenkivsky%'
+# "Sequential scan on 500k rows. Need a GIN index for text search:
+#  CREATE INDEX idx_properties_address_gin ON properties USING gin(address gin_trgm_ops)"
+```
+
+**Who needs this:**
+- Projects with PostgreSQL where you frequently need to explore data
+- Parser debugging — verify data is being saved correctly
+- Query optimization without switching between IDE and psql
+- Migrations and schema refactoring
+
+**When NOT needed:** projects without a database, or when regular psql/pgAdmin is sufficient.
+
+**⚠️ Security:**
+- Enable **read-only** mode by default
+- For production — create a separate user with SELECT-only permissions
+- Write access — only for dev/staging
+
+Repository: `https://github.com/modelcontextprotocol/servers/tree/main/src/postgres`
+
+---
+
+### 20.4 DevOps Skill — Comprehensive Infrastructure Management
+
+**Why:** Combine SSH Manager + PostgreSQL MCP + infrastructure knowledge into a single Skill. The agent works as a junior DevOps: monitors, diagnoses, fixes — but under strict rules.
+
+**Structure:**
+
+```markdown
+# .claude/skills/devops.md
+---
+name: devops
+description: Server infrastructure diagnostics and management
+---
+
+## Skill Purpose
+Problem diagnostics, infrastructure health monitoring, safe execution
+of operations on servers via SSH Manager MCP.
+
+## Instructions
+1. Before ANY operation — first check the current state (status, logs)
+2. For diagnostics — use read-only commands
+3. For changes — first show the plan, wait for confirmation
+4. After changes — verify everything works
+
+## Non-Negotiable Acceptance Criteria
+- [ ] Never execute rm -rf, DROP DATABASE, or destructive commands without explicit confirmation
+- [ ] Always diagnose first, then act
+- [ ] Log every command executed on the server
+- [ ] Before restarting a service — check for active connections/transactions
+- [ ] After any change — verify the service works (health check)
+
+## Output
+Structured report:
+- What was checked
+- What was found (errors, anomalies)
+- What was done (with commands)
+- Current status after changes
+```
+
+📌 Real-world example
+
+**Situation:** Monday morning. The parser hasn't been working all weekend. You need to: understand the cause → fix it → make sure no data was lost → restart.
+
+```bash
+claude> "Diagnose why the parser hasn't worked since Friday"
+# Agent (using SSH + PostgreSQL MCP):
+# 1. docker ps -a → parser status "Exited (137)" since Friday 23:45
+# 2. docker logs parser --since 72h → OOM Kill (Out of Memory)
+# 3. SELECT COUNT(*), MAX(created_at) FROM properties → last record: Friday 23:44
+# 4. free -h on server → 95% RAM consumed by Redis cache
+#
+# Report:
+# - Cause: OOM Kill — Redis consumed all memory, Docker killed the parser
+# - Lost: ~48 hours of parsing (from Friday 23:45 until now)
+# - Recommendation: limit Redis maxmemory, add restart: always to docker-compose
+
+claude> "Fix it and restart"
+# 1. docker exec redis redis-cli CONFIG SET maxmemory 512mb
+# 2. docker exec redis redis-cli CONFIG SET maxmemory-policy allkeys-lru
+# 3. docker restart parser
+# 4. sleep 10 && docker logs --tail 5 parser → "Successfully parsed 3 listings"
+# 5. SELECT COUNT(*) FROM properties WHERE created_at > now() - interval '5 minutes' → 3
+# ✅ Parser is working, data is being written
+```
+
+**Who needs this:**
+- Teams without a dedicated DevOps (developer = DevOps too)
+- Startups where one person writes code and fixes servers
+- Projects with Docker infrastructure on VPS
+- Incident management: quick diagnostics under stress
+
+**When NOT needed:** dedicated DevOps/SRE exists, managed infrastructure (Vercel, Railway, Heroku), or no SSH access.
+
+---
+
+### Useful MCP Servers — Summary Table
+
+| MCP Server | Purpose | Installation | Priority |
+|---|---|---|---|
+| Context7 | Up-to-date library documentation | `claude mcp add context7 -- npx -y @upstash/context7-mcp@latest` | 🔴 Everyone |
+| SSH Manager | Server management via SSH | `npm i -g mcp-ssh-manager` | 🟡 DevOps/backend with servers |
+| PostgreSQL | Direct database access | `npx -y @modelcontextprotocol/server-postgres` | 🟡 Projects with PostgreSQL |
+| Playwright | Browser control, screenshots, tests | `claude mcp add playwright -- npx @anthropic/mcp-playwright` | 🟡 Frontend, e2e tests |
+| GitHub | PRs, issues, actions from agent | Built into Claude Code | 🟢 Team development |
+
+Full MCP server catalog: `https://github.com/modelcontextprotocol/servers`
+
+---
+
+## 21. Official Resources
 
 | Resource | Link |
 |---|---|
@@ -1109,7 +1407,10 @@ Full curated list: https://github.com/walkinglabs/awesome-harness-engineering
 | Chrome Extension | https://code.claude.com/docs/en/chrome |
 | Remote Control | https://code.claude.com/docs/en/remote-control |
 | Scheduled Tasks | https://code.claude.com/docs/en/scheduled-tasks |
+| MCP Servers | https://github.com/modelcontextprotocol/servers |
 | gstack | https://github.com/garrytan/gstack |
 | Biome no-type-assertion | https://github.com/albertodeago/biome-plugin-no-type-assertion |
 | Official Skills repo | https://github.com/anthropics/skills |
 | Awesome Harness Engineering | https://github.com/walkinglabs/awesome-harness-engineering |
+| Context7 | https://github.com/upstash/context7 |
+| SSH Manager MCP | https://github.com/bvisible/mcp-ssh-manager |

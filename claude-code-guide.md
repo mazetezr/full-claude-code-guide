@@ -1096,9 +1096,305 @@ E-commerce на Next.js 14 (App Router) + Prisma + PostgreSQL + Stripe.
 
 Полный курированный список: https://github.com/walkinglabs/awesome-harness-engineering
 
+## 20. 🟡 MCP-серверы — расширение возможностей агента
+
+**Зачем:** MCP (Model Context Protocol) — протокол который даёт Claude Code доступ к внешним инструментам. Без MCP агент умеет: читать/писать файлы, bash, git. С MCP — подключается к базам данных, удалённым серверам, браузерам, документации и любым API.
+
+**Принцип:** один MCP-сервер = один источник данных или инструмент. Агент сам решает когда вызвать нужный MCP на основе контекста задачи.
+
+**Как подключить MCP:**
+
+```bash
+# Через CLI
+claude mcp add <имя> -- <команда запуска>
+
+# Или в .claude/settings.json
+{
+  "mcpServers": {
+    "имя-сервера": {
+      "command": "npx",
+      "args": ["-y", "@package/mcp-server"]
+    }
+  }
+}
+```
+
+Документация: `https://code.claude.com/docs/en/mcp`
+
 ---
 
-## 20. Официальные ресурсы
+### 20.1 Context7 — актуальная документация библиотек
+
+**Зачем:** Claude Code обучен на данных с конкретной датой среза. Он не знает про новые API, breaking changes, обновлённые best practices. Context7 подтягивает актуальную документацию прямо из официальных источников библиотек — в реальном времени, для конкретной версии.
+
+**Установка:**
+
+```bash
+claude mcp add context7 -- npx -y @upstash/context7-mcp@latest
+```
+
+**Использование:**
+
+Добавить `use context7` в промпт:
+```
+Создай middleware для FastAPI с JWT-авторизацией. use context7
+```
+
+Агент автоматически:
+1. Определяет что нужна документация FastAPI
+2. Подтягивает актуальные docs для текущей версии
+3. Пишет код на основе реальных API, а не памяти
+
+📌 Пример из жизни
+
+**Ситуация:** Ты используешь Selenium 4.x для парсинга. В Selenium 4 изменился API — `find_element_by_xpath()` стал `find_element(By.XPATH, ...)`. Без Context7 агент может написать старый синтаксис (он видел его чаще в обучающих данных). С Context7 — подтянет актуальный API.
+
+```bash
+# Без context7:
+driver.find_element_by_xpath("//div[@class='price']")  # deprecated с Selenium 4
+
+# С context7:
+driver.find_element(By.XPATH, "//div[@class='price']")  # актуальный API
+```
+
+**Кому нужно:** всем — это базовый MCP. Особенно если работаешь с часто обновляемыми библиотеками (фреймворки, ORM, облачные SDK).
+
+Репозиторий: `https://github.com/upstash/context7`
+
+---
+
+### 20.2 SSH Manager — управление удалёнными серверами
+
+**Зачем:** Дать агенту SSH-доступ к серверам. Агент может: выполнять команды, читать логи, проверять статус сервисов, управлять Docker-контейнерами, делать бэкапы — всё через естественный язык.
+
+**Установка:**
+
+```bash
+npm install -g mcp-ssh-manager
+claude mcp add ssh-manager -- npx mcp-ssh-manager
+
+# Добавить сервер
+ssh-manager server add
+# → имя: production
+# → хост: 192.168.1.100
+# → пользователь: deploy
+# → ключ: ~/.ssh/id_rsa
+```
+
+**Возможности (37+ инструментов):**
+
+| Категория | Что умеет |
+|---|---|
+| Команды | Выполнение любых shell-команд на удалённом сервере |
+| Мониторинг | CPU, RAM, диск, статус сервисов |
+| Docker | Список контейнеров, логи, restart, stats |
+| Файлы | Upload/download файлов между локальной машиной и сервером |
+| БД | Дамп/восстановление MySQL, PostgreSQL, MongoDB |
+| Безопасность | Анализ логов, блокировка IP через iptables/ufw |
+
+📌 Пример из жизни
+
+**Ситуация:** Ты DevOps/бэкенд-разработчик. Парсер на продакшене упал в 3 ночи. Утром нужно понять что произошло, починить и перезапустить.
+
+```bash
+claude> "Подключись к серверу production.
+        Покажи логи парсера за последние 2 часа.
+        Найди ошибки и объясни что случилось."
+
+# Агент:
+# 1. SSH на production
+# 2. tail -n 500 /var/log/parser/error.log
+# 3. Анализирует: "OLX заблокировал IP в 03:17. Rate limit exceeded.
+#    Прокси-ротация не сработала — файл proxies.txt пустой."
+# 4. Предлагает: "Обновить список прокси и перезапустить парсер"
+
+claude> "Перезапусти парсер и покажи что он работает"
+# docker restart parser && docker logs --tail 20 parser
+```
+
+Более продвинутый пример — защита сервера:
+```bash
+claude> "Проанализируй /var/log/auth.log за последние сутки.
+        Найди подозрительные IP с брутфорсом.
+        Заблокируй их через ufw."
+
+# Агент:
+# 1. grep "Failed password" /var/log/auth.log | awk '{print $11}' | sort | uniq -c | sort -rn
+# 2. "Найдено 3 IP с 500+ попытками: 45.33.x.x, 91.12.x.x, 185.7.x.x"
+# 3. ufw deny from 45.33.x.x && ufw deny from 91.12.x.x && ...
+```
+
+**Кому нужно:**
+- DevOps и сисадмины которые управляют серверами
+- Бэкенд-разработчики с доступом к staging/production
+- Проекты с Docker на удалённых серверах
+- Мониторинг и инцидент-менеджмент
+
+**Когда НЕ нужно:** локальная разработка без серверов, фронтенд-проекты.
+
+**⚠️ Безопасность:** SSH-доступ для AI — мощно, но опасно. Рекомендации:
+- Используй отдельного пользователя с ограниченными правами
+- Никогда не давай root-доступ
+- Начни с read-only команд (логи, статус)
+- Используй SSH-ключи, не пароли
+- На production — только после тестирования на staging
+
+Репозиторий: `https://github.com/bvisible/mcp-ssh-manager`
+
+---
+
+### 20.3 PostgreSQL MCP — прямой доступ к базе данных
+
+**Зачем:** Агент подключается к PostgreSQL и может: выполнять SQL-запросы, исследовать схему, анализировать производительность, помогать с миграциями. Вместо того чтобы копировать запросы между терминалом и Claude — агент работает с БД напрямую.
+
+**Установка:**
+
+```bash
+# Базовый вариант (read-only по умолчанию)
+claude mcp add postgres -- npx -y @modelcontextprotocol/server-postgres \
+  "postgresql://user:pass@localhost:5432/mydb"
+
+# Или продвинутый с анализом производительности
+npm install -g @henkey/postgres-mcp-server
+```
+
+**Возможности:**
+
+| Функция | Описание |
+|---|---|
+| Schema exploration | Список таблиц, колонок, типов, связей |
+| SQL-запросы | SELECT, INSERT, UPDATE (если разрешено) |
+| EXPLAIN анализ | Показать план выполнения запроса |
+| Индексы | Предложить оптимальные индексы |
+| Миграции | Помощь с генерацией миграций |
+| Здоровье БД | Размер таблиц, мёртвые строки, bloat |
+
+📌 Пример из жизни
+
+**Ситуация:** Ты работаешь над парсером недвижимости. Данные сохраняются в PostgreSQL. Нужно понять структуру данных, найти дубликаты, оптимизировать медленный запрос.
+
+```bash
+claude> "Покажи схему таблицы properties — какие поля, типы, индексы"
+# Агент: SELECT * FROM information_schema.columns WHERE table_name = 'properties'
+# "Таблица properties: id, url, price, area, rooms, address, source, created_at, ...
+#  Индексы: primary key на id, нет индекса на url — это проблема для дедупликации"
+
+claude> "Найди дубликаты объявлений по URL"
+# SELECT url, COUNT(*) as cnt FROM properties GROUP BY url HAVING COUNT(*) > 1 ORDER BY cnt DESC
+# "Найдено 847 дубликатов. Топ: olx.ua/d/obyavlenie/... — 12 копий"
+
+claude> "Почему запрос поиска по районам медленный?"
+# EXPLAIN ANALYZE SELECT * FROM properties WHERE address ILIKE '%Шевченковский%'
+# "Sequential scan на 500k строк. Нужен GIN-индекс для text search:
+#  CREATE INDEX idx_properties_address_gin ON properties USING gin(address gin_trgm_ops)"
+```
+
+**Кому нужно:**
+- Проекты с PostgreSQL где нужно часто исследовать данные
+- Дебаг парсеров — проверить что данные сохраняются правильно
+- Оптимизация запросов без переключения между IDE и psql
+- Миграции и рефакторинг схемы
+
+**Когда НЕ нужно:** проекты без БД, или когда хватает обычного psql/pgAdmin.
+
+**⚠️ Безопасность:**
+- По умолчанию включай **read-only** режим
+- Для production — создай отдельного пользователя с SELECT-only правами
+- Write-доступ — только для dev/staging
+
+Репозиторий: `https://github.com/modelcontextprotocol/servers/tree/main/src/postgres`
+
+---
+
+### 20.4 DevOps Skill — комплексное управление инфраструктурой
+
+**Зачем:** Объединить SSH Manager + PostgreSQL MCP + знание инфраструктуры в один Skill. Агент работает как junior DevOps: мониторит, диагностирует, чинит — но по строгим правилам.
+
+**Структура:**
+
+```markdown
+# .claude/skills/devops.md
+---
+name: devops
+description: Диагностика и управление серверной инфраструктурой
+---
+
+## Skill Purpose
+Диагностика проблем, мониторинг здоровья инфраструктуры, безопасное
+выполнение операций на серверах через SSH Manager MCP.
+
+## Instructions
+1. Перед ЛЮБОЙ операцией — сначала проверь текущее состояние (статус, логи)
+2. Для диагностики — используй read-only команды
+3. Для изменений — сначала покажи план, дождись подтверждения
+4. После изменений — проверь что всё работает
+
+## Non-Negotiable Acceptance Criteria
+- [ ] Никогда не выполнять rm -rf, DROP DATABASE, или деструктивные команды без явного подтверждения
+- [ ] Всегда сначала диагностика, потом действие
+- [ ] Логировать каждую выполненную команду на сервере
+- [ ] Перед перезапуском сервиса — проверить что нет активных соединений/транзакций
+- [ ] После любого изменения — верификация что сервис работает (health check)
+
+## Output
+Структурированный отчёт:
+- Что было проверено
+- Что найдено (ошибки, аномалии)
+- Что сделано (с командами)
+- Текущий статус после изменений
+```
+
+📌 Пример из жизни
+
+**Ситуация:** Понедельник утро. Парсер не работал всё выходные. Нужно: понять причину → починить → убедиться что данные не потеряны → перезапустить.
+
+```bash
+claude> "Продиагностируй почему парсер не работал с пятницы"
+# Агент (используя SSH + PostgreSQL MCP):
+# 1. docker ps -a → парсер в статусе "Exited (137)" с пятницы 23:45
+# 2. docker logs parser --since 72h → OOM Kill (Out of Memory)
+# 3. SELECT COUNT(*), MAX(created_at) FROM properties → последняя запись: пятница 23:44
+# 4. free -h на сервере → 95% RAM занято Redis кэшем
+#
+# Отчёт:
+# - Причина: OOM Kill — Redis съел всю память, Docker убил парсер
+# - Потеряно: ~48 часов парсинга (с пятницы 23:45 до сейчас)
+# - Рекомендация: ограничить Redis maxmemory, добавить restart: always в docker-compose
+
+claude> "Исправь и перезапусти"
+# 1. docker exec redis redis-cli CONFIG SET maxmemory 512mb
+# 2. docker exec redis redis-cli CONFIG SET maxmemory-policy allkeys-lru
+# 3. docker restart parser
+# 4. sleep 10 && docker logs --tail 5 parser → "Successfully parsed 3 listings"
+# 5. SELECT COUNT(*) FROM properties WHERE created_at > now() - interval '5 minutes' → 3
+# ✅ Парсер работает, данные пишутся
+```
+
+**Кому нужно:**
+- Команды без выделенного DevOps (разработчик = и DevOps тоже)
+- Стартапы где один человек и код пишет, и сервер чинит
+- Проекты с Docker-инфраструктурой на VPS
+- Инцидент-менеджмент: быстрая диагностика в стрессовой ситуации
+
+**Когда НЕ нужно:** есть выделенный DevOps/SRE, managed infrastructure (Vercel, Railway, Heroku), или нет SSH-доступа.
+
+---
+
+### Полезные MCP-серверы — сводная таблица
+
+| MCP-сервер | Назначение | Установка | Приоритет |
+|---|---|---|---|
+| Context7 | Актуальная документация библиотек | `claude mcp add context7 -- npx -y @upstash/context7-mcp@latest` | 🔴 Всем |
+| SSH Manager | Управление серверами через SSH | `npm i -g mcp-ssh-manager` | 🟡 DevOps/бэкенд с серверами |
+| PostgreSQL | Прямой доступ к БД | `npx -y @modelcontextprotocol/server-postgres` | 🟡 Проекты с PostgreSQL |
+| Playwright | Управление браузером, скриншоты, тесты | `claude mcp add playwright -- npx @anthropic/mcp-playwright` | 🟡 Фронтенд, e2e тесты |
+| GitHub | PR, issues, actions из агента | Встроен в Claude Code | 🟢 Командная разработка |
+
+Полный каталог MCP-серверов: `https://github.com/modelcontextprotocol/servers`
+
+---
+
+## 21. Официальные ресурсы
 
 | Ресурс | Ссылка |
 |---|---|
@@ -1109,7 +1405,10 @@ E-commerce на Next.js 14 (App Router) + Prisma + PostgreSQL + Stripe.
 | Chrome Extension | https://code.claude.com/docs/en/chrome |
 | Remote Control | https://code.claude.com/docs/en/remote-control |
 | Scheduled Tasks | https://code.claude.com/docs/en/scheduled-tasks |
+| MCP Servers | https://github.com/modelcontextprotocol/servers |
 | gstack | https://github.com/garrytan/gstack |
 | Biome no-type-assertion | https://github.com/albertodeago/biome-plugin-no-type-assertion |
 | Official Skills repo | https://github.com/anthropics/skills |
 | Awesome Harness Engineering | https://github.com/walkinglabs/awesome-harness-engineering |
+| Context7 | https://github.com/upstash/context7 |
+| SSH Manager MCP | https://github.com/bvisible/mcp-ssh-manager |
